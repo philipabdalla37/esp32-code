@@ -7,8 +7,30 @@
 /**************************INCLUDES*************************************************/
 #include "i2s_hal.h"
 #include <Arduino.h>
+#include <math.h>
 
 /********************MACRO DEFINITIONS***********************************************/
+// ---- High-pass filter config ----
+// #define HPF_ALPHA 0.97f   // tweak between 0.95–0.99 if needed
+// // ---- Low-pass filter config ----
+// #define LPF_ALPHA 0.1f   // 0 < alpha <= 1, smaller = smoother, lower cutoff
+#define M_PI 3.14159265358979323846 // Define PI if not available
+
+// ---- Band-pass filter config: 93–238 Hz ----
+#define BP_FC_LOW   93.0f    // high-pass corner
+#define BP_FC_HIGH  238.0f   // low-pass corner
+
+static float bp_hp_a  = 0.0f;        // high-pass (via low-pass subtraction) coefficient
+static float bp_lp_a  = 0.0f;        // low-pass coefficient
+
+// State per mic (4 mics)
+static float bp_hp_prev_lp[4]  = {0, 0, 0, 0};  // low-pass state used to make the high-pass
+static float bp_lp_prev_out[4] = {0, 0, 0, 0};  // low-pass output after high-pass
+
+
+// Add to your header file (i2s_hal.h)
+#define SPEECH_RMS_THRESHOLD 12000.0f  // Adjust based on your calibration
+#define MIN_SPEECH_FRAMES 3             // Require multiple frames above threshold
 
 /*************************Enumerations***********************************************/
 
@@ -20,6 +42,7 @@ typedef struct
   size_t buf_bytes_read[I2S_PORT_TOTAL];//are 512 = 64 frames x 2 samples/frame x 4 bytes/sample 
   uint32_t i2s_error;
   float calibration_gain[4]; /* per-microphone gain factors (mic1..mic4) */
+  uint8_t speech_frame_count[4];  // Track consecutive speech frames per mic
 } I2sData_t;
 
 
@@ -48,11 +71,64 @@ static inline int32_t I2sHal_ApplyCalibration(int32_t sample, float gain)
 /*************************Local Variables***********************************************/
 static I2sConfig_t i2sConfig = {0};//Used Only for Init
 static I2sData_t i2sData = {0};
+static float hpf_prev_in[4]  = {0, 0, 0, 0};
+static float hpf_prev_out[4] = {0, 0, 0, 0};
+
+//static float lpf_prev_out[4] = {0, 0, 0, 0};
+
+static inline int32_t I2sHal_BandPass_93_238(int mic_index, int32_t sample24)
+{
+  float x = (float)sample24;
+
+  // --- 1) High-pass at ~93 Hz using "x - lowpass(x)" idea ---
+  // Low-pass the input with cutoff at BP_FC_LOW (93 Hz)
+  // This low-pass is used to track the slow/DC component
+  float lp_dc = (1.0f - bp_hp_a) * x + bp_hp_a * bp_hp_prev_lp[mic_index];
+  bp_hp_prev_lp[mic_index] = lp_dc;
+
+  // High-pass output = input - its low-frequency (DC/slow) component
+  float x_hp = x - lp_dc;
+
+  // --- 2) Low-pass at ~228 Hz to cut everything above that ---
+  // The state of the high-pass output is then low-pass filtered
+  float y = (1.0f - bp_lp_a) * x_hp + bp_lp_a * bp_lp_prev_out[mic_index];
+  bp_lp_prev_out[mic_index] = y;
+
+  // Clamp to 24-bit-ish range for safety
+  if (y >  8388607.0f)  y =  8388607.0f;
+  if (y < -8388608.0f)  y = -8388608.0f;
+
+  return (int32_t)y;
+}
+
+// Assume SAMPLE_RATE is defined elsewhere (e.g., #define SAMPLE_RATE 16000)
+// This function needs to be added to calculate the coefficients
+void I2sHal_CalculateFilterCoefficients(uint32_t sample_rate)
+{
+    // High-pass (via low-pass subtraction) for the low corner (BP_FC_LOW = 93 Hz)
+    // The low-pass for subtraction (lp_dc) needs to pass low frequencies
+    // The alpha for the "lp_dc" calculation needs to be for the cutoff 93 Hz
+    float tau_low = 1.0f / (2.0f * M_PI * BP_FC_LOW);
+    // bp_hp_a is the alpha for the low-pass part (lp_dc)
+    bp_hp_a = tau_low / (tau_low + (1.0f / (float)sample_rate)); 
+    
+    // Low-pass for the high corner (BP_FC_HIGH = 238 Hz)
+    float tau_high = 1.0f / (2.0f * M_PI * BP_FC_HIGH);
+    // bp_lp_a is the alpha for the final low-pass
+    bp_lp_a = tau_high / (tau_high + (1.0f / (float)sample_rate));
+    
+    // Serial.print("BP_HP_A: "); Serial.println(bp_hp_a, 6);
+    // Serial.print("BP_LP_A: "); Serial.println(bp_lp_a, 6);
+}
 
 capstoneErrorCode_t I2sHal_Init(void)
 {
   setup_i2s(I2S_PORT_0, I2S0_SCK, I2S0_WS, I2S0_SD);
   setup_i2s(I2S_PORT_1, I2S1_SCK, I2S1_WS, I2S1_SD);
+
+  // Calculate filter coefficients based on the sample rate
+  I2sHal_CalculateFilterCoefficients(SAMPLE_RATE);
+
   /* initialize calibration gains to 1.0 (no change) */
   for (int i = 0; i < 4; ++i) i2sData.calibration_gain[i] = 1.0f;
   if (i2sConfig.i2s_error != I2S_OK)
@@ -79,6 +155,11 @@ capstoneErrorCode_t I2sHal_Run(void)
   size_t frames_common = ( (i2sData.buf_bytes_read[I2S_PORT_0] < i2sData.buf_bytes_read[I2S_PORT_1]) ? i2sData.buf_bytes_read[I2S_PORT_0] : i2sData.buf_bytes_read[I2S_PORT_1]) / (sizeof(int32_t) * 2); // each frame = 2 x int32_t (stereo: Right + Left)
   if (frames_common == 0) return CAPSTONE_FAIL; //frames_common reads the full Buf length (64)
 
+  // Accumulators for RMS: sum of squares for each mic
+  int64_t acc_sq[4] = {0, 0, 0, 0};
+  int64_t max_value = 0;
+  int closest_mic = 0;
+
   for(size_t i = 0; i < frames_common; i++)
   {
     int32_t raw1 = I2sHal_Extract24BitSample(i2sData.buf_port[I2S_PORT_0][i * 2 + 0]); // Left from Port 0 (24-bit)
@@ -91,12 +172,116 @@ capstoneErrorCode_t I2sHal_Run(void)
     int32_t mic3 = I2sHal_ApplyCalibration(raw3, i2sData.calibration_gain[2]);
     int32_t mic4 = I2sHal_ApplyCalibration(raw4, i2sData.calibration_gain[3]);
 
-    Serial.print(mic1); Serial.print(' ');
-    Serial.print(mic2); Serial.print(' ');
-    Serial.print(mic3); Serial.print(' ');
-    Serial.println(mic4);
+    // High-pass filter to remove DC / low frequency noise
+    // mic1 = I2sHal_HighPass(0, mic1);
+    // mic2 = I2sHal_HighPass(1, mic2);
+    // mic3 = I2sHal_HighPass(2, mic3);
+    // mic4 = I2sHal_HighPass(3, mic4);
+
+    // Then low-pass
+    // mic1 = I2sHal_LowPass(0, mic1);
+    // mic2 = I2sHal_LowPass(1, mic2);
+    // mic3 = I2sHal_LowPass(2, mic3);
+    // mic4 = I2sHal_LowPass(3, mic4);
+
+    // Apply 93–238 Hz band-pass per mic
+    mic1 = I2sHal_BandPass_93_238(0, mic1);
+    mic2 = I2sHal_BandPass_93_238(1, mic2);
+    mic3 = I2sHal_BandPass_93_238(2, mic3);
+    mic4 = I2sHal_BandPass_93_238(3, mic4);
+
+    if(mic1 < 2500 && mic1 >-2500 ){
+      mic1 = 0;
+    }
+    if(mic2 < 2500 && mic2 >-2500 ){
+      mic2 = 0;
+    }
+    if(mic3 < 2500 && mic3 >-2500 ){
+      mic3 = 0;
+    }
+    if(mic4 < 2500 && mic4 >-2500 ){
+      mic4 = 0;
+    }
+
+    acc_sq[0] = (int64_t)mic1 * (int64_t)mic1;
+    acc_sq[1] = (int64_t)mic2 * (int64_t)mic2;
+    acc_sq[2] = (int64_t)mic3 * (int64_t)mic3;
+    acc_sq[3] = (int64_t)mic4 * (int64_t)mic4;
+    max_value = acc_sq[0];
+    closest_mic = 0;
+    for (int m = 1; m < 4; ++m)
+    {
+      if (acc_sq[m] > max_value)
+      {
+        max_value = acc_sq[m];
+        closest_mic = m;
+      }
+    }
+    Serial.println(closest_mic);
+    // Serial.print(mic1); Serial.print(' ');
+    // Serial.print(mic2); Serial.print(' ');
+    // Serial.print(mic3); Serial.print(' ');
+    // Serial.println(mic4);
   }
   
+  // // Compute RMS for each mic
+  // float rms[4];
+  // bool speech_detected[4] = {false, false, false, false};
+  
+  // for (int m = 0; m < 4; ++m)
+  // {
+  //   rms[m] = sqrtf((float)acc_sq[m] / (float)frames_common);
+    
+  //   // Check if RMS exceeds speech threshold
+  //   if (rms[m] > SPEECH_RMS_THRESHOLD)
+  //   {
+  //     speech_detected[m] = true;
+  //     //i2sData.speech_frame_count[m]++;
+  //   }
+  //   else
+  //   {
+  //     rms[m] = 0;
+  //     //i2sData.speech_frame_count[m] = 0;  // Reset counter
+  //    }
+  // }
+
+  // Serial.print(rms[0]); Serial.print(' ');
+  // Serial.print(rms[1]); Serial.print(' ');
+  // Serial.print(rms[2]); Serial.print(' ');
+  // Serial.println(rms[3]);
+
+  // // Find microphone with highest RMS that exceeds threshold
+  // int closest_mic = -1;
+  // float max_rms = SPEECH_RMS_THRESHOLD;
+  
+  // for (int m = 0; m < 4; ++m)
+  // {
+  //   if (i2sData.speech_frame_count[m] >= MIN_SPEECH_FRAMES && rms[m] > max_rms)
+  //   {
+  //     max_rms = rms[m];
+  //     closest_mic = m;
+  //   }
+  // }
+
+  // // Print results
+  // Serial.print("RMS: ");
+  // for (int m = 0; m < 4; ++m)
+  // {
+  //   Serial.print("mic"); Serial.print(m+1); Serial.print("="); 
+  //   Serial.print(rms[m], 1);
+  //   if (speech_detected[m]) Serial.print("*");
+  //   Serial.print(" ");
+  // }
+  
+  // if (closest_mic >= 0)
+  // {
+  //   Serial.print(" -> Closest: mic"); Serial.println(closest_mic + 1);
+  // }
+  // else
+  // {
+  //   Serial.println(" -> No speech detected");
+  // }
+
   return CAPSTONE_SUCCESS;
 }
 
@@ -222,4 +407,5 @@ void setup_i2s(I2sPort_t port, int sck, int ws, int sd)
     i2sConfig.is_config = false;
     i2sConfig.i2s_error |= I2S_START_ERR;
   }
+  i2s_zero_dma_buffer((i2s_port_t)port);
 }

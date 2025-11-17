@@ -29,13 +29,13 @@
 // Decimate/average so Serial can keep up
 #define DECIMATE 16  // print one averaged sample per 16 frames
 void setup() {
-  Serial.begin(115200);
+  Serial.begin(9600);
   // If your plot stutters, try a higher baud like 921600 (and set the Plotter to match)
   // Serial.begin(921600);
   Serial.println("ESP32-S3: 4-mic (2x I2S) reader - prints L1 R1 L2 R2");
   I2sHal_Init();
   delay(500);
-  I2sHal_AutoCalibrate(20000); // measure for 3000 ms (3 seconds)
+  // I2sHal_AutoCalibrate(20000); // measure for 3000 ms (3 seconds)
 }
 
 void loop() {

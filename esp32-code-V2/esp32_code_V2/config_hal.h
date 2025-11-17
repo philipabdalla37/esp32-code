@@ -16,11 +16,11 @@
 #define I2S0_SD  40   // DOUT (shared by left+right mics)
 
 // --- Second pair of mics on I2S1 ---
-#define I2S1_SCK I2S0_SCK //before it was 9
-#define I2S1_WS  8  
+#define I2S1_SCK 9 //before it was 9
+#define I2S1_WS  8 //before it was 8  
 #define I2S1_SD  7
 
-#define SAMPLE_RATE 16000  // 16 kHz for speech
+#define SAMPLE_RATE 16000  // 16 kHz for speech (16000)
 
 #define STEREO_FRAMES 64 // Each "frame" is 2 samples (R then L) with I2S_CHANNEL_FMT_RIGHT_LEFT
 
