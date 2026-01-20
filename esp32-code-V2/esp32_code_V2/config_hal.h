@@ -7,29 +7,49 @@
 #ifndef CONFIG_HAL_
 #define CONFIG_HAL_
 
-#include <driver/i2s.h>
+#include <driver/i2s_std.h>
+#include <driver/gpio.h>
 
 /*******************I2S Config***************************/
 // --- First pair of mics on I2S0 ---
-#define I2S0_SCK 42   // BCLK
-#define I2S0_WS  41   // LRCLK / WS
-#define I2S0_SD  40   // DOUT (shared by left+right mics)
+// Pair A (Mics 1 & 2) -> I2S_NUM_0
+#define I2S0_SCK      GPIO_NUM_42   // Serial Clock (SCK)
+#define I2S0_WS       GPIO_NUM_41   // Word Select (WS)
+#define I2S0_SD       GPIO_NUM_40   // Serial Data (SD)
 
-// --- Second pair of mics on I2S1 (Moved to safe pins) ---
-#define I2S1_SCK 4    // Bit Clock
-#define I2S1_WS  5    // Word Select
-#define I2S1_SD  6    // Serial Data
+// Pair B (Mics 3 & 4) -> I2S_NUM_1
+#define I2S1_SCK      GPIO_NUM_4   // Serial Clock (SCK)
+#define I2S1_WS       GPIO_NUM_5   // Word Select (WS)
+#define I2S1_SD       GPIO_NUM_6   // Serial Data (SD)
 
+
+#define I2S_NUM_DMA 6
+#define I2S_DMA_SIZE_IN_SAMPLES 512
 #define SAMPLE_RATE 16000  // 16 kHz for speech (16000)
-
 #define STEREO_FRAMES 64 // Each "frame" is 2 samples (R then L) with I2S_CHANNEL_FMT_RIGHT_LEFT
+
+
+/*******************Light Ring Config***************************/
+#define LED_DATA_PIN 18
+#define LED_NUM_LEDS 16
+#define LED_TYPE WS2812
+#define LED_BRIGHTNESS 50
 
 /***************************Enumerations*****************************************/
 typedef enum{
   I2S_PORT_0 = I2S_NUM_0,
   I2S_PORT_1 = I2S_NUM_1,
-  I2S_PORT_TOTAL = (I2S_NUM_1 + 1)
+  I2S_PORT_TOTAL = 2
 }
 I2sPort_t;
+
+typedef enum{
+  MIC_1 = 0,
+  MIC_2,
+  MIC_3,
+  MIC_4,
+  MIC_TOTAL
+}
+I2sMics_t;
 
 #endif /*CONFIG_HAL_*/

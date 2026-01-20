@@ -1,16 +1,30 @@
-#include "i2s_hal.h"
-#include "freertos/queue.h"
-#include <math.h>
+#include <Arduino.h>
+#include "mic_i2s_hal.h"
+#include "led_hal.h"
+#include "error_codes.h"
+#include "config_hal.h"
 
 void setup() {
-  Serial.begin(9600);
+  Serial.begin(921600);
+  delay(500);  // Give serial time to stabilize
+  LedHal_Init();
   Serial.println("ESP32-S3: 4-mic (2x I2S) reader - prints L1 R1 L2 R2");
   I2sHal_Init();
   delay(500);
-  // I2sHal_AutoCalibrate(20000); // measure for 3000 ms (3 seconds)
-  // delay(500);
+  // I2sHal_AutoCalibrate(5000);
+  // delay(50);
 }
 
 void loop() {
-  I2sHal_Run();
+  if (I2sHal_Run() == CAPSTONE_SUCCESS) {
+    // 1. Get Audio
+    int16_t* audio_buffer = I2sHal_GetBuffer();
+    
+    // 2. Send Raw Binary to Pi
+    // 64 samples * 2 bytes = 128 bytes per packet
+    Serial.write((uint8_t*)audio_buffer, STEREO_FRAMES * sizeof(int16_t));
+
+    // 3. Example: Update LED Ring (Pseudo-code)
+    LedHal_Run(I2sHal_GetClosestMic());
+  }
 }
