@@ -1,0 +1,56 @@
+import serial
+import numpy as np
+import wave
+import time
+import struct
+
+# --- CONFIGURATION ---
+# The ESP32 usually shows up as /dev/ttyACM0 or /dev/ttyUSB0
+SERIAL_PORT = '/dev/ttyACM0' 
+BAUD_RATE = 921600       # Must match your ESP32 Serial.begin
+SAMPLE_RATE = 16000      # 16kHz
+DURATION = 10            # Record for 10 seconds
+
+def record_audio():
+    try:
+        print(f"Connecting to {SERIAL_PORT}...")
+        ser = serial.Serial(SERIAL_PORT, BAUD_RATE)
+        print("Connected! Recording...")
+        
+        # Prepare a list to hold the audio data
+        frames = []
+        
+        # Calculate how many bytes we expect for 10 seconds
+        # 16000 samples/sec * 2 bytes/sample = 32,000 bytes/sec
+        bytes_to_read = SAMPLE_RATE * 2 * DURATION
+        
+        start_time = time.time()
+        
+        while (time.time() - start_time) < DURATION:
+            if ser.in_waiting > 0:
+                # Read whatever is available
+                data = ser.read(ser.in_waiting)
+                frames.append(data)
+
+        print("Recording finished. Saving file...")
+        ser.close()
+        
+        # Combine all chunks
+        raw_data = b''.join(frames)
+        
+        # Save as WAV
+        with wave.open("output_mic_test.wav", "wb") as wf:
+            wf.setnchannels(1)       # Mono
+            wf.setsampwidth(2)       # 16-bit (2 bytes)
+            wf.setframerate(SAMPLE_RATE)
+            wf.writeframes(raw_data)
+            
+        print("Saved to 'output_mic_test.wav'")
+        print("Play it with: aplay output_mic_test.wav")
+
+    except Exception as e:
+        print(f"Error: {e}")
+        print("Hint: Check if /dev/ttyACM0 is correct (ls /dev/tty*)")
+
+if __name__ == "__main__":
+    record_audio()
