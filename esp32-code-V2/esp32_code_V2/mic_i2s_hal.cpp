@@ -23,6 +23,9 @@ typedef struct {
     float calibration_gain[MIC_TOTAL];
     I2sMics_t current_best_mic;
     int hysteresis_count;
+
+    unsigned long timer_start;          // To track the 3000ms
+    double energy_accumulator[MIC_TOTAL]; // To keep score during the 3000ms
     
     // The "Final Output" buffer ready for Speech AI (16-bit Mono)
     int16_t processed_output[STEREO_FRAMES]; 
@@ -93,6 +96,8 @@ capstoneErrorCode_t I2sHal_Init(void) {
     // initialize logic
     for(int i=0; i<4; i++) i2sData.calibration_gain[i] = 1.0f;
     i2sData.current_best_mic = MIC_1;
+    i2sData.timer_start = millis(); // <--- ADD THIS LINE
+memset(i2sData.energy_accumulator, 0, sizeof(i2sData.energy_accumulator)); // <--- ADD THIS LINE
 
     // 1. Define General Config
     i2s_chan_config_t chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_AUTO, I2S_ROLE_MASTER);
@@ -142,7 +147,7 @@ capstoneErrorCode_t I2sHal_Run(void) {
     int frames = samples_read / 2; // Should be 64
     if (frames == 0) return CAPSTONE_FAIL;
 
-    double sum_sq[MIC_TOTAL] = {0};
+    //double sum_sq[MIC_TOTAL] = {0};
 
     // 2. Process Every Frame
     for (int i = 0; i < frames; i++) {
@@ -158,11 +163,18 @@ capstoneErrorCode_t I2sHal_Run(void) {
         int16_t s3 = ProcessSample(MIC_3, r3);
         int16_t s4 = ProcessSample(MIC_4, r4);
 
-        // C. Calculate Energy (RMS) for Decision Logic
-        sum_sq[MIC_1] += (double)s1 * s1;
-        sum_sq[MIC_2] += (double)s2 * s2;
-        sum_sq[MIC_3] += (double)s3 * s3;
-        sum_sq[MIC_4] += (double)s4 * s4;
+        // C. ACCUMULATE ENERGY (Keeping Score)
+        // We add the energy to the running total for this 3-second window
+        i2sData.energy_accumulator[MIC_1] += (double)s1 * s1;
+        i2sData.energy_accumulator[MIC_2] += (double)s2 * s2;
+        i2sData.energy_accumulator[MIC_3] += (double)s3 * s3;
+        i2sData.energy_accumulator[MIC_4] += (double)s4 * s4;
+
+        // // C. Calculate Energy (RMS) for Decision Logic
+        // sum_sq[MIC_1] += (double)s1 * s1;
+        // sum_sq[MIC_2] += (double)s2 * s2;
+        // sum_sq[MIC_3] += (double)s3 * s3;
+        // sum_sq[MIC_4] += (double)s4 * s4;
 
         // D. Save "Winner" Audio for Output
         // This acts as a digital switch (multiplexer)
@@ -174,18 +186,18 @@ capstoneErrorCode_t I2sHal_Run(void) {
         }
     }
 
-    // 3. Logic: Who is the loudest? (Sticky/Hysteresis)
-    float rms[MIC_TOTAL];
-    int frame_loudest = MIC_1;
-    float max_vol = 0;
+    // // 3. Logic: Who is the loudest? (Sticky/Hysteresis)
+    // float rms[MIC_TOTAL];
+    // int frame_loudest = MIC_1;
+    // float max_vol = 0;
 
-    for(int k=0; k<MIC_TOTAL; k++) {
-        rms[k] = sqrt(sum_sq[k] / frames);
-        if (rms[k] > max_vol) {
-            max_vol = rms[k];
-            frame_loudest = k;
-        }
-    }
+    // for(int k=0; k<MIC_TOTAL; k++) {
+    //     rms[k] = sqrt(sum_sq[k] / frames);
+    //     if (rms[k] > max_vol) {
+    //         max_vol = rms[k];
+    //         frame_loudest = k;
+    //     }
+    // }
 
     // "Sticky" Switching Logic
     // Only switch if:
@@ -206,29 +218,55 @@ capstoneErrorCode_t I2sHal_Run(void) {
     //     }
     // }
 
-    // This helps the AI realize nobody is talking.
-    bool is_silence = (max_vol < 300.0f); // Adjust this threshold based on your room
+    // // This helps the AI realize nobody is talking.
+    // bool is_silence = (max_vol < 300.0f); // Adjust this threshold based on your room
 
-    // --- NEW: Switching Logic (Reduced Clicking) ---
-    if (!is_silence) {
-        if (frame_loudest != i2sData.current_best_mic) {
-            // Only switch if the new mic is significantly louder (20%)
-            if (rms[frame_loudest] > (rms[i2sData.current_best_mic] * 1.2f)) {
-                 i2sData.hysteresis_count++;
-                 if (i2sData.hysteresis_count >= 3) {
-                     i2sData.current_best_mic = (I2sMics_t)frame_loudest;
-                     i2sData.hysteresis_count = 0;
-                 }
-            } else {
-                i2sData.hysteresis_count = 0;
+    // // --- NEW: Switching Logic (Reduced Clicking) ---
+    // if (!is_silence) {
+    //     if (frame_loudest != i2sData.current_best_mic) {
+    //         // Only switch if the new mic is significantly louder (20%)
+    //         if (rms[frame_loudest] > (rms[i2sData.current_best_mic] * 1.2f)) {
+    //              i2sData.hysteresis_count++;
+    //              if (i2sData.hysteresis_count >= 3) {
+    //                  i2sData.current_best_mic = (I2sMics_t)frame_loudest;
+    //                  i2sData.hysteresis_count = 0;
+    //              }
+    //         } else {
+    //             i2sData.hysteresis_count = 0;
+    //         }
+    //     }
+    // }
+
+    // // --- APPLY GATE TO BUFFER ---
+    // // If we determined it's silent, overwrite the output buffer with Zeros.
+    // if (is_silence) {
+    //     memset(i2sData.processed_output, 0, sizeof(i2sData.processed_output));
+    // }
+
+    // 3. THE TIMER LOGIC
+    // Only check the winner if 3000ms has passed
+    if (millis() - i2sData.timer_start >= 3000) {
+        
+        double max_energy = 0;
+        int new_winner = i2sData.current_best_mic; // Default to staying put
+
+        // Find who had the highest total score over the last 3 seconds
+        for(int k=0; k<MIC_TOTAL; k++) {
+            if (i2sData.energy_accumulator[k] > max_energy) {
+                max_energy = i2sData.energy_accumulator[k];
+                new_winner = k;
             }
         }
-    }
 
-    // --- APPLY GATE TO BUFFER ---
-    // If we determined it's silent, overwrite the output buffer with Zeros.
-    if (is_silence) {
-        memset(i2sData.processed_output, 0, sizeof(i2sData.processed_output));
+        // Silence Check (optional): If total energy is super low, don't switch randomly
+        // You can remove this 'if' if you want it to always switch to the loudest noise (even floor noise)
+        if (max_energy > (500.0 * 500.0 * frames * 10)) { // Rough heuristic for silence
+             i2sData.current_best_mic = (I2sMics_t)new_winner;
+        }
+
+        // Reset for the next 3000ms round
+        memset(i2sData.energy_accumulator, 0, sizeof(i2sData.energy_accumulator));
+        i2sData.timer_start = millis();
     }
 
     return CAPSTONE_SUCCESS;
