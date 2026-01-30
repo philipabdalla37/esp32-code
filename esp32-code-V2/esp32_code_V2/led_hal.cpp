@@ -57,3 +57,9 @@ capstoneErrorCode_t LedHal_Run(I2sMics_t mic)
     
     return CAPSTONE_SUCCESS;
 }
+
+
+void LedHal_White()
+{
+  fill_solid(ledData.leds, LED_NUM_LEDS, CRGB::White);
+}

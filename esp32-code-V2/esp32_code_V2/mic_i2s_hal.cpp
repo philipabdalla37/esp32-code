@@ -245,7 +245,7 @@ capstoneErrorCode_t I2sHal_Run(void) {
 
     // 3. THE TIMER LOGIC
     // Only check the winner if 3000ms has passed
-    if (millis() - i2sData.timer_start >= 3000) {
+    if (millis() - i2sData.timer_start >= 1000) {
         
         double max_energy = 0;
         int new_winner = i2sData.current_best_mic; // Default to staying put

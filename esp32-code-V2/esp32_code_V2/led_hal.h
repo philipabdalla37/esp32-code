@@ -26,5 +26,6 @@ typedef enum
 /*************************Public Functions***********************************************/
 extern capstoneErrorCode_t LedHal_Init(void);
 extern capstoneErrorCode_t LedHal_Run(I2sMics_t mic);
+extern void LedHal_White();
 
 #endif /*LED_HAL_*/

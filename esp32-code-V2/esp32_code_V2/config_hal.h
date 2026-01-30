@@ -35,6 +35,9 @@
 #define LED_TYPE WS2812
 #define LED_BRIGHTNESS 50
 
+/*******************Button Config***************************/
+#define BUTTON 8 //when prssed it is LOW
+
 /***************************Enumerations*****************************************/
 typedef enum{
   I2S_PORT_0 = I2S_NUM_0,
