@@ -32,6 +32,7 @@ void loop() {
     LedHal_Run(I2sHal_GetClosestMic());
   } else {
     LedHal_White();
+    delay(10);
   }
 
 }

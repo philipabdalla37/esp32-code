@@ -33,26 +33,25 @@ capstoneErrorCode_t LedHal_Init(void)
 
 capstoneErrorCode_t LedHal_Run(I2sMics_t mic)
 {
-    // 1. RESET: Turn all lights off in the memory buffer first.
-    // Without this, the previous winner's lights will stay on forever.
+    // 1. RESET: Turn all lights off first
     fill_solid(ledData.leds, LED_NUM_LEDS, CRGB::Black);
     
-    // 2. MATH: Calculate the slice size dynamically
-    // 16 LEDs / 4 Mics = 4 LEDs per Mic
-    int leds_per_mic = LED_NUM_LEDS / MIC_TOTAL; 
-    
-    int start_index = (int)mic * leds_per_mic;
-    int end_index   = start_index + leds_per_mic;
+    // 2. LOOKUP: Get the starting LED index from your map
+    // (Ensure MIC_LED_MAP is defined globally or in your header)
+    int start_index = MIC_LED_MAP[mic].start_led_index;
 
-    // 3. SET: Turn on only the winner's section
-    for (int i = start_index; i < end_index; i++) {
-        // Safety check: ensure we don't write outside the array
-        if (i < LED_NUM_LEDS) {
-            ledData.leds[i] = CRGB::White;   
-        }
+    // 3. LOOP: Turn on 4 LEDs starting from that index
+    for (int i = 0; i < 4; i++) {
+        
+        // --- THE MAGIC MATH (Modulo Operator) ---
+        // We take the start_index, add 'i' (0, 1, 2, 3), 
+        // and use '%' to wrap it around if it exceeds the total LEDs.
+        int target_led = (start_index + i) % LED_NUM_LEDS;
+        
+        ledData.leds[target_led] = CRGB::White; // Or your preferred color
     }
 
-    // 4. SHOW: Push the data to the strip
+    // 4. SHOW: Push data to strip
     FastLED.show();
     
     return CAPSTONE_SUCCESS;

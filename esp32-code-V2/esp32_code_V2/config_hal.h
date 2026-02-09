@@ -55,4 +55,17 @@ typedef enum{
 }
 I2sMics_t;
 
+typedef struct {
+    I2sMics_t mic; 
+    int start_led_index;
+} MicLedMapping_t; // I renamed this slightly to make it clear it's a "Map"
+
+//Added [MIC_TOTAL] to make it an array
+static const MicLedMapping_t MIC_LED_MAP[MIC_TOTAL] = {
+    {MIC_1, 14},   // Mic 0 starts at LED 0
+    {MIC_2, 2},   // Mic 1 starts at LED 4
+    {MIC_3, 10},   // Mic 2 starts at LED 8
+    {MIC_4, 6}   // Mic 3 starts at LED 12
+};
+
 #endif /*CONFIG_HAL_*/
