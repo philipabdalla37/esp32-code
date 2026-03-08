@@ -157,7 +157,7 @@ capstoneErrorCode_t I2sHal_Run(void) {
             // SPEECH DETECTED! 
             // Lock onto this winner for 3 seconds to ensure stability.
             i2sData.current_best_mic = (I2sMics_t)new_winner;
-            i2sData.current_interval = 3000; 
+            i2sData.current_interval = 1000; 
         } else {
             // SILENCE DETECTED.
             // Stay on the winner, but check again very soon (200ms).

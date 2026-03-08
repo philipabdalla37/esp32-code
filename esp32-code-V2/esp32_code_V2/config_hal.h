@@ -62,10 +62,10 @@ typedef struct {
 
 //Added [MIC_TOTAL] to make it an array
 static const MicLedMapping_t MIC_LED_MAP[MIC_TOTAL] = {
-    {MIC_1, 14},   // Mic 0 starts at LED 0
-    {MIC_2, 2},   // Mic 1 starts at LED 4
-    {MIC_3, 10},   // Mic 2 starts at LED 8
-    {MIC_4, 6}   // Mic 3 starts at LED 12
+    {MIC_1, 4},   // Mic 0 starts at LED 0
+    {MIC_2, 8},   // Mic 1 starts at LED 4
+    {MIC_3, 0},   // Mic 2 starts at LED 8
+    {MIC_4, 12}   // Mic 3 starts at LED 12
 };
 
 #endif /*CONFIG_HAL_*/
