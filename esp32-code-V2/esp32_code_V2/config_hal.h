@@ -18,9 +18,9 @@
 #define I2S0_SD       GPIO_NUM_40   // Serial Data (SD)
 
 // Pair B (Mics 3 & 4) -> I2S_NUM_1
-#define I2S1_SCK      GPIO_NUM_4   // Serial Clock (SCK)
+#define I2S1_SCK      GPIO_NUM_6   // Serial Clock (SCK)
 #define I2S1_WS       GPIO_NUM_5   // Word Select (WS)
-#define I2S1_SD       GPIO_NUM_6   // Serial Data (SD)
+#define I2S1_SD       GPIO_NUM_4   // Serial Data (SD)
 
 
 #define I2S_NUM_DMA 6
